@@ -21,19 +21,28 @@ class CausalEstimate:
 
 
 class CAE:
-    """Conditional Average Effect -- standard regression-based estimator."""
-    def __init__(self, model=None):
-        self.model = model or LogisticRegression(max_iter=1000)
+    """Conditional Average Effect -- OLS regression-based estimator."""
+    def __init__(self):
+        pass
 
     def estimate(self, df, treatment_col, outcome_col, covariate_cols) -> CausalEstimate:
         from sklearn.linear_model import LinearRegression
-        X = df[covariate_cols + [treatment_col]].values
+        X_raw = df[covariate_cols + [treatment_col]].values
         y = df[outcome_col].values
-        ols = LinearRegression().fit(X, y)
+        ols = LinearRegression(fit_intercept=True).fit(X_raw, y)
         treat_idx = len(covariate_cols)
         treat_coef = ols.coef_[treat_idx]
-        residuals = y - ols.predict(X)
-        se = np.sqrt(np.mean(residuals**2) / len(y))
+        residuals = y - ols.predict(X_raw)
+        # Add constant column for correct (X'X)^{-1} SE calculation
+        X = np.column_stack([np.ones(len(y)), X_raw])
+        n, p = X.shape
+        mse = np.sum(residuals**2) / (n - p) if n > p else np.sum(residuals**2) / n
+        try:
+            XtX_inv = np.linalg.inv(X.T @ X)
+            # treat_idx+1 because column 0 is the intercept
+            se = np.sqrt(mse * XtX_inv[treat_idx + 1, treat_idx + 1])
+        except np.linalg.LinAlgError:
+            se = np.sqrt(mse / n)
         return CausalEstimate(
             estimate=treat_coef, ci_lower=treat_coef - 1.96*se,
             ci_upper=treat_coef + 1.96*se, se=se,

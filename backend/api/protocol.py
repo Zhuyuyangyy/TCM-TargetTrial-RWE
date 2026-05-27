@@ -40,7 +40,15 @@ async def list_protocols():
 async def create_protocol(req: ProtocolCreateRequest):
     if req.trial_id in _protocols:
         raise HTTPException(status_code=409, detail="Protocol already exists")
+    from backend.models.trial_protocol import (
+        EligibilityCriteria, TreatmentStrategy, OutcomeDefinition)
+    eligibility = EligibilityCriteria(**req.eligibility) if req.eligibility else EligibilityCriteria()
+    strategies = [TreatmentStrategy(**s) for s in req.treatment_strategies] if req.treatment_strategies else []
+    primary = OutcomeDefinition(**req.primary_outcome) if req.primary_outcome else None
+    secondary = [OutcomeDefinition(**s) for s in req.secondary_outcomes] if req.secondary_outcomes else []
     p = TargetTrialProtocol(trial_id=req.trial_id, title=req.title, description=req.description,
+                            eligibility=eligibility, treatment_strategies=strategies,
+                            primary_outcome=primary, secondary_outcomes=secondary,
                             follow_up_weeks=req.follow_up_weeks,
                             adjustment_variables=req.adjustment_variables,
                             effect_measure=req.effect_measure)

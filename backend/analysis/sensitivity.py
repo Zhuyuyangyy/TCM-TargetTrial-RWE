@@ -24,10 +24,13 @@ class TippingPointResult:
 
 class SensitivityAnalyzer:
     def e_value(self, estimate, ci_lower=None, ci_upper=None, rare_outcome=True):
+        if estimate == 0:
+            return EValueResult(0, float("inf"), None,
+                                "E-value is undefined for a null point estimate (RR=0).")
         rr = abs(estimate) if abs(estimate) >= 1 else 1 / abs(estimate)
         ev = rr + np.sqrt(rr * (rr - 1))
         ev_ci = None
-        if ci_lower is not None:
+        if ci_lower is not None and abs(ci_lower) > 1e-12:
             rr_ci = abs(ci_lower) if abs(ci_lower) >= 1 else 1 / abs(ci_lower)
             ev_ci = rr_ci + np.sqrt(rr_ci * (rr_ci - 1))
         parts = [
