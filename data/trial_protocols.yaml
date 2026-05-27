@@ -1,0 +1,98 @@
+trial_id: "NSCLC-TCM-001"
+title: "Fuzheng Guben as Adjuvant Therapy for NSCLC: Target Trial Emulation"
+version: "1.0"
+description: >
+  This protocol emulates a target trial evaluating the effectiveness of
+  Fuzheng Guben decoction as adjuvant therapy versus standard care alone
+  in patients with stage II-III NSCLC after surgical resection.
+
+eligibility:
+  min_age: 18
+  max_age: 80
+  required_diagnoses:
+    - "nsclc_diagnosis"
+    - "post_surgical"
+  excluded_diagnoses:
+    - "stage_iv"
+    - "other_primary_cancer"
+    - "severe_organ_dysfunction"
+  min_lab_values:
+    ejection_fraction: 50.0
+    albumin: 30.0
+  max_lab_values:
+    creatinine: 177.0
+  required_prior_treatments:
+    - "surgical_resection"
+  excluded_prior_treatments:
+    - "prior_tcm_adjuvant"
+
+treatment_strategies:
+  - name: "Fuzheng Guben + Standard Care"
+    description: "Fuzheng Guben decoction (Astragalus 30g, Codonopsis 15g, Atractylodes 15g, Poria 12g, Ligustrum 15g, Lycium 12g, Cuscuta 15g, Psoralea 12g) administered orally twice daily for 24 weeks."
+    tcm_formula: "Fuzheng Guben Decoction"
+    components:
+      - "Astragalus (Huangqi) 30g"
+      - "Codonopsis (Dangshen) 15g"
+      - "Atractylodes (Baizhu) 15g"
+      - "Poria (Fuling) 12g"
+      - "Ligustrum (Nvzhenzi) 15g"
+      - "Lycium (Gouqizi) 12g"
+      - "Cuscuta (Tusizi) 15g"
+      - "Psoralea (Buguzhi) 12g"
+    dosage: "200ml twice daily"
+    duration_weeks: 24
+    comparator: false
+
+  - name: "Standard Care Alone"
+    description: "Standard post-operative adjuvant chemotherapy and follow-up per NCCN guidelines."
+    components:
+      - "Platinum-based adjuvant chemotherapy"
+    duration_weeks: 24
+    comparator: true
+
+primary_outcome:
+  name: "Overall Survival"
+  outcome_type: "survival"
+  variable: "death"
+  time_variable: "survival_months"
+  direction: "higher"
+
+secondary_outcomes:
+  - name: "Disease-Free Survival"
+    outcome_type: "survival"
+    variable: "recurrence"
+    time_variable: "dfs_months"
+    direction: "higher"
+  - name: "Quality of Life"
+    outcome_type: "continuous"
+    variable: "qol_score"
+    direction: "higher"
+    minimal_clinically_important_difference: 10.0
+  - name: "Chemotherapy Completion Rate"
+    outcome_type: "binary"
+    variable: "chemo_completed"
+    direction: "higher"
+  - name: "Immune Function (CD4/CD8 ratio)"
+    outcome_type: "continuous"
+    variable: "cd4_cd8_ratio"
+    direction: "higher"
+
+follow_up_weeks: 156
+grace_period_weeks: 8
+
+adjustment_variables:
+  - "age"
+  - "sex"
+  - "smoking_status"
+  - "histology"
+  - "stage"
+  - "egfr_mutation"
+  - "pd_l1_tps"
+  - "ki67"
+  - "albumin_baseline"
+  - "lymphocyte_count"
+  - "neutrophil_lymphocyte_ratio"
+  - "hospital"
+  - "year_of_diagnosis"
+
+effect_measure: "hazard_ratio"
