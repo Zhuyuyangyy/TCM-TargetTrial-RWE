@@ -62,3 +62,39 @@ async def get_protocol(trial_id: str):
     if trial_id not in _protocols:
         raise HTTPException(status_code=404, detail="Protocol not found")
     return _protocols[trial_id].to_dict()
+
+
+# --- Pre-configured protocol templates ---
+
+@router.get("/templates/list")
+async def list_protocol_templates():
+    """List all pre-configured protocol templates."""
+    from backend.models.protocol_templates import list_templates
+    return list_templates()
+
+
+@router.get("/templates/{template_id}")
+async def get_protocol_template(template_id: str):
+    """Get a specific protocol template by ID."""
+    from backend.models.protocol_templates import get_template
+    try:
+        template = get_template(template_id)
+        return template.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/templates/{template_id}/load")
+async def load_template_as_protocol(template_id: str):
+    """Load a template into the protocol registry for analysis."""
+    from backend.models.protocol_templates import get_template
+    try:
+        template = get_template(template_id)
+        _protocols[template.trial_id] = template
+        return {
+            "message": f"Template '{template_id}' loaded as protocol '{template.trial_id}'",
+            "trial_id": template.trial_id,
+            "title": template.title,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
