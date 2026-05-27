@@ -4,7 +4,7 @@ from typing import Optional
 import pandas as pd
 from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
-from backend.models.causal_engine import IPW, AIPW
+from backend.models.causal_engine import IPW, AIPW, TMLE
 from backend.analysis.propensity_score import PropensityScoreAnalyzer
 from backend.analysis.survival import SurvivalAnalyzer
 from backend.analysis.sensitivity import SensitivityAnalyzer
@@ -77,7 +77,8 @@ async def run_causal(req: CausalRequest, data_key: str = "data"):
     if data_key not in _data_store:
         raise HTTPException(400, "Upload data first")
     df = _data_store[data_key]
-    engine = AIPW() if req.method == "aipw" else IPW()
+    engines = {"aipw": AIPW, "ipw": IPW, "tmle": TMLE}
+    engine = engines.get(req.method, AIPW)()
     r = engine.estimate(df, req.treatment_col, req.outcome_col, req.covariate_cols)
     return {"method": r.method, "estimate": round(r.estimate, 6),
             "ci_lower": round(r.ci_lower, 6), "ci_upper": round(r.ci_upper, 6),

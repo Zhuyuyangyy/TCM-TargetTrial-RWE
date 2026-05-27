@@ -21,3 +21,5 @@ data/*.parquet
 output/
 results/
 _generated/
+
+docs/

@@ -52,10 +52,11 @@ class CAE:
 
 class IPW:
     """Inverse Probability of Treatment Weighting estimator."""
-    def __init__(self, ps_model=None, trim_percentile=99.0, stabilize=True):
+    def __init__(self, ps_model=None, trim_percentile=99.0, stabilize=True, n_bootstrap=500):
         self.ps_model = ps_model or LogisticRegression(max_iter=1000)
         self.trim_percentile = trim_percentile
         self.stabilize = stabilize
+        self.n_bootstrap = n_bootstrap
 
     def fit_propensity_scores(self, df, treatment_col, covariate_cols):
         X = df[covariate_cols].values
@@ -85,8 +86,8 @@ class IPW:
         ate = mu1 - mu0
         # Bootstrap SE
         rng = np.random.RandomState(42)
-        boot = np.empty(500)
-        for b in range(500):
+        boot = np.empty(self.n_bootstrap)
+        for b in range(self.n_bootstrap):
             idx = rng.choice(len(df), len(df), replace=True)
             df_b = df.iloc[idx].reset_index(drop=True)
             ps_b = self.fit_propensity_scores(df_b, treatment_col, covariate_cols)
