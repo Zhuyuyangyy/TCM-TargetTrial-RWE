@@ -135,3 +135,116 @@ class AIPW:
             estimate=ate, ci_lower=ate - 1.96*se, ci_upper=ate + 1.96*se,
             se=se, method="AIPW", n_obs=len(df), n_effective=float(len(df)),
         )
+
+
+class TMLE:
+    """Targeted Maximum Likelihood Estimation (TMLE) for continuous outcomes.
+
+    Two-stage doubly-robust, locally efficient estimator:
+      Stage 1: Initial outcome model Q(A,X) via cross-fitting with ML.
+      Stage 2: Targeting step solves the efficient influence curve (EIC)
+               estimating equation via a parametric fluctuation.
+
+    For continuous Y: linear fluctuation  Q* = Q + eps * H(A,X)
+      where H(A,X) = A/g(X) - (1-A)/(1-g(X)) is the clever covariate.
+
+    Provides ATE estimates with inference based on the EIC.
+    Reference: van der Laan & Rose (2011), Targeted Learning.
+    """
+
+    def __init__(self, outcome_model=None, ps_model=None, trim_bounds=(0.01, 0.99),
+                 n_splits=5, seed=42):
+        self.outcome_model = outcome_model or GradientBoostingRegressor(
+            n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42,
+        )
+        self.ps_model = ps_model or LogisticRegression(max_iter=1000)
+        self.trim_bounds = trim_bounds
+        self.n_splits = n_splits
+        self.seed = seed
+
+    # ------------------------------------------------------------------
+    def estimate(self, df, treatment_col, outcome_col, covariate_cols) -> CausalEstimate:
+        X = df[covariate_cols].values.astype(float)
+        t = df[treatment_col].values.astype(float)
+        y = df[outcome_col].values.astype(float)
+        n = len(y)
+
+        # ---- Stage 1: Cross-fitted initial predictions ----
+        from sklearn.model_selection import KFold
+        from sklearn.base import clone as _clone
+
+        kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
+        Q1_hat = np.zeros(n)
+        Q0_hat = np.zeros(n)
+        g_hat  = np.zeros(n)
+
+        for train_idx, val_idx in kf.split(X):
+            X_tr, X_val = X[train_idx], X[val_idx]
+            y_tr = y[train_idx]
+            t_tr = t[train_idx]
+
+            # Propensity model P(A=1|X)
+            ps = _clone(self.ps_model)
+            ps.fit(X_tr, t_tr)
+            g_hat[val_idx] = np.clip(
+                ps.predict_proba(X_val)[:, 1],
+                self.trim_bounds[0], self.trim_bounds[1],
+            )
+
+            # Outcome models Q1(X)=E[Y|A=1,X], Q0(X)=E[Y|A=0,X]
+            m1 = _clone(self.outcome_model)
+            m0 = _clone(self.outcome_model)
+            idx1 = t_tr == 1
+            idx0 = t_tr == 0
+            if idx1.sum() > 5:
+                m1.fit(X_tr[idx1], y_tr[idx1])
+                Q1_hat[val_idx] = m1.predict(X_val)
+            if idx0.sum() > 5:
+                m0.fit(X_tr[idx0], y_tr[idx0])
+                Q0_hat[val_idx] = m0.predict(X_val)
+
+        # ---- Stage 2: Targeting (fluctuation) step ----
+        # Clever covariate: H(A,X) = A/g(X) - (1-A)/(1-g(X))
+        H = t / g_hat - (1.0 - t) / (1.0 - g_hat)
+
+        # For continuous Y, use linear fluctuation:
+        #   Q_eps(A,X) = Q(A,X) + eps * H(A,X)
+        # Solve: 0 = sum_i H_i * (Y_i - Q_hat(A_i,X_i) - eps * H_i)
+        # => eps = sum_i H_i * (Y_i - Q_hat_i) / sum_i H_i^2
+        Q_obs = t * Q1_hat + (1.0 - t) * Q0_hat  # Q under observed treatment
+        residuals = y - Q_obs
+        denom = np.mean(H ** 2)
+        epsilon = np.mean(H * residuals) / denom if denom > 1e-12 else 0.0
+
+        # Fluctuated predictions for each treatment arm
+        # For A=1: H = 1/g(X);   For A=0: H = -1/(1-g(X))
+        H1 = 1.0 / g_hat
+        H0 = -1.0 / (1.0 - g_hat)
+        Q1_star = Q1_hat + epsilon * H1
+        Q0_star = Q0_hat + epsilon * H0
+
+        ate = float(np.mean(Q1_star - Q0_star))
+
+        # ---- Inference via efficient influence curve ----
+        # EIC = A/g*(Y - Q1*) - (1-A)/(1-g*)*(Y - Q0*) + (Q1* - Q0*) - psi
+        eic = (t / g_hat * (y - Q1_star)
+               - (1.0 - t) / (1.0 - g_hat) * (y - Q0_star)
+               + (Q1_star - Q0_star)
+               - ate)
+        se = float(np.std(eic) / np.sqrt(n))
+
+        return CausalEstimate(
+            estimate=ate,
+            ci_lower=ate - 1.96 * se,
+            ci_upper=ate + 1.96 * se,
+            se=se,
+            method="TMLE",
+            n_obs=n,
+            n_effective=float(n),
+            weights_summary={
+                "epsilon": float(epsilon),
+                "ps_mean": float(np.mean(g_hat)),
+                "ps_min": float(np.min(g_hat)),
+                "ps_max": float(np.max(g_hat)),
+            },
+        )

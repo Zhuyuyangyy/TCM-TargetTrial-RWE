@@ -97,3 +97,85 @@ class PropensityScoreAnalyzer:
         balance = self.assess_balance(df, treatment_col, covariate_cols, weights)
         return PSResult(ps, weights, matched, balance.standardized_mean_differences,
                         f"PS_{method}_{self.model_type}")
+
+
+class OverlapWeightEstimator:
+    """Overlap (entropy) weighting for causal inference.
+
+    Overlap weights: w(A,X) = A*(1-e(X)) + (1-A)*e(X), where e(X) is the
+    propensity score.  These weights naturally down-weight subjects near the
+    treatment decision boundary (extreme PS values), eliminating the need
+    for arbitrary trimming.  The resulting estimator targets the ATO
+    (average treatment effect in the overlap population).
+
+    Reference: Li, Morgan & Zaslavsky (2018), JASA.
+    """
+
+    def __init__(self, ps_model=None):
+        self.ps_model = ps_model or LogisticRegression(max_iter=1000)
+        self._scaler = StandardScaler()
+
+    def fit_propensity(self, df, treatment_col, covariate_cols):
+        X = self._scaler.fit_transform(df[covariate_cols].values)
+        t = df[treatment_col].values
+        self.ps_model.fit(X, t)
+        ps = np.clip(self.ps_model.predict_proba(X)[:, 1], 0.01, 0.99)
+        return ps
+
+    def overlap_weights(self, ps, treatment):
+        """Compute overlap weights: A*(1-ps) + (1-A)*ps."""
+        t = treatment.astype(float)
+        return t * (1 - ps) + (1 - t) * ps
+
+    def entropy_weights(self, ps, treatment):
+        """Entropy weights: minimize KL divergence (Li & Li, 2019)."""
+        t = treatment.astype(float)
+        w1 = -ps * np.log(ps)              # treated contribution
+        w0 = -(1 - ps) * np.log(1 - ps)    # control contribution
+        return t * w1 + (1 - t) * w0
+
+    def estimate_ato(self, df, treatment_col, outcome_col, covariate_cols):
+        """Estimate the ATE in the overlap population using overlap weights.
+
+        Returns (ate, se, ci_lower, ci_upper, weights, ps).
+        """
+        ps = self.fit_propensity(df, treatment_col, covariate_cols)
+        t = df[treatment_col].values.astype(float)
+        y = df[outcome_col].values.astype(float)
+        w = self.overlap_weights(ps, t)
+
+        w1 = w * t
+        w0 = w * (1 - t)
+        mu1 = np.sum(w1 * y) / np.sum(w1)
+        mu0 = np.sum(w0 * y) / np.sum(w0)
+        ate = mu1 - mu0
+
+        # Sandwich / robust SE via influence function
+        n = len(y)
+        D1 = w1 * (y - mu1) / np.mean(w1)
+        D0 = w0 * (y - mu0) / np.mean(w0)
+        D = D1 - D0 - ate
+        se = np.std(D) / np.sqrt(n)
+
+        return {
+            "estimate": float(ate),
+            "se": float(se),
+            "ci_lower": float(ate - 1.96 * se),
+            "ci_upper": float(ate + 1.96 * se),
+            "weights": w,
+            "ps": ps,
+            "n_effective": float(np.sum(w) ** 2 / np.sum(w ** 2)),
+            "method": "overlap_weighting",
+        }
+
+    def full_analysis(self, df, treatment_col, outcome_col, covariate_cols):
+        """Run overlap weighting and return PSResult-compatible object."""
+        result = self.estimate_ato(df, treatment_col, outcome_col, covariate_cols)
+        psa = PropensityScoreAnalyzer()
+        balance = psa.assess_balance(df, treatment_col, covariate_cols, result["weights"])
+        return {
+            **result,
+            "balance": balance.overall_balance,
+            "smds": balance.standardized_mean_differences,
+            "variance_ratios": balance.variance_ratios,
+        }

@@ -129,3 +129,65 @@ async def run_ce(req: CERequest, data_key: str = "data"):
     r = cea.analyze(_data_store[data_key], req.treatment_col, req.cost_col, req.effect_col)
     return {"icer": round(r.icer, 2) if r.icer else None, "nmb": round(r.nmb, 2),
             "prob_cost_effective": round(r.prob_cost_effective, 4)}
+
+
+class BalanceRequest(BaseModel):
+    treatment_col: str
+    covariate_cols: list[str]
+    model_type: str = "logistic"
+    weights_type: str = "iptw"  # "iptw", "overlap", "none"
+
+
+@router.post("/balance")
+async def run_balance(req: BalanceRequest, data_key: str = "data"):
+    """SMD diagnostics endpoint.  Computes standardized mean differences
+    (unweighted and weighted) plus variance ratios for covariate balance
+    assessment.
+
+    weights_type options:
+      - "none":   unweighted (crude) balance
+      - "iptw":   inverse probability of treatment weights
+      - "overlap": overlap (entropy) weights
+    """
+    if data_key not in _data_store:
+        raise HTTPException(400, "Upload data first")
+    df = _data_store[data_key]
+
+    psa = PropensityScoreAnalyzer(model_type=req.model_type)
+    ps = psa.estimate_propensity_scores(df, req.treatment_col, req.covariate_cols)
+    t = df[req.treatment_col].values
+
+    # Unweighted balance
+    bal_unw = psa.assess_balance(df, req.treatment_col, req.covariate_cols, weights=None)
+
+    result = {
+        "unweighted": {
+            "smd": {k: round(v, 4) for k, v in bal_unw.standardized_mean_differences.items()},
+            "variance_ratio": {k: round(v, 4) for k, v in bal_unw.variance_ratios.items()},
+            "overall": bal_unw.overall_balance,
+            "max_smd": round(max(bal_unw.standardized_mean_differences.values()), 4),
+        },
+    }
+
+    if req.weights_type == "iptw":
+        weights = psa.compute_iptw(ps, t, stabilize=True)
+        bal_w = psa.assess_balance(df, req.treatment_col, req.covariate_cols, weights)
+        result["weighted_iptw"] = {
+            "smd": {k: round(v, 4) for k, v in bal_w.standardized_mean_differences.items()},
+            "variance_ratio": {k: round(v, 4) for k, v in bal_w.variance_ratios.items()},
+            "overall": bal_w.overall_balance,
+            "max_smd": round(max(bal_w.standardized_mean_differences.values()), 4),
+        }
+    elif req.weights_type == "overlap":
+        from backend.analysis.propensity_score import OverlapWeightEstimator
+        ols = OverlapWeightEstimator()
+        ow = ols.overlap_weights(ps, t.astype(float))
+        bal_w = psa.assess_balance(df, req.treatment_col, req.covariate_cols, ow)
+        result["weighted_overlap"] = {
+            "smd": {k: round(v, 4) for k, v in bal_w.standardized_mean_differences.items()},
+            "variance_ratio": {k: round(v, 4) for k, v in bal_w.variance_ratios.items()},
+            "overall": bal_w.overall_balance,
+            "max_smd": round(max(bal_w.standardized_mean_differences.values()), 4),
+        }
+
+    return result
