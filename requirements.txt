@@ -1,0 +1,11 @@
+PyYAML
+fastapi
+numpy
+pandas
+pydantic
+scikit-learn
+uvicorn
+lifelines>=0.27.8
+statsmodels>=0.14.0
+pyyaml>=6.0
+scipy>=1.11.0
