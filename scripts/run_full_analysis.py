@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Run the full TCM-TargetTrial-RWE pipeline on semi-realistic NSCLC data.
 
+DISCLAIMER: This script runs on synthetic/semi-realistic data generated for
+method validation purposes only. All results are for benchmarking causal
+inference pipelines and do not represent real clinical findings.
+
 Pipeline:
   1. Generate / load semi-realistic EHR data (3000 NSCLC patients)
   2. Handle missing data (median imputation for this demo)
@@ -8,7 +12,7 @@ Pipeline:
   4. Propensity score estimation (logistic)
   5. Covariate balance diagnostics (SMD before/after, Love plot data)
   6. IPW, AIPW, and TMLE causal estimation
-  7. Survival analysis (Cox PH, RMST)
+  7. Survival analysis (Cox PH, RMST) with IPW weighting
   8. Cost-effectiveness (ICER, NMB)
   9. Sensitivity analysis (E-value, tipping point)
   10. Print comprehensive results table
@@ -220,10 +224,11 @@ def run_full_analysis(n: int = 3000, seed: int = 42) -> dict:
 
     sa = SurvivalAnalyzer()
 
-    # Cox PH (use original scale for interpretable coefficients)
-    print("\n  --- Cox Proportional Hazards ---")
+    # Cox PH (use original scale for interpretable coefficients, with IPW weights)
+    print("\n  --- Cox Proportional Hazards (IPW-weighted) ---")
     try:
-        cox = sa.cox_ph(df, time_col, outcome_col, treatment_col, covariate_cols)
+        cox = sa.cox_ph(df, time_col, outcome_col, treatment_col, covariate_cols,
+                        weights=weights)
         print(f"  Hazard Ratio     : {cox.hazard_ratio:.4f}")
         print(f"  95% CI           : [{cox.ci_lower:.4f}, {cox.ci_upper:.4f}]")
         print(f"  p-value          : {cox.p_value:.4e}")
@@ -233,10 +238,10 @@ def run_full_analysis(n: int = 3000, seed: int = 42) -> dict:
         print(f"  Cox PH failed: {e}")
         results["cox_hr"] = None
 
-    # Kaplan-Meier + RMST
-    print("\n  --- Restricted Mean Survival Time (RMST) ---")
+    # Kaplan-Meier + RMST (with IPW weights)
+    print("\n  --- Restricted Mean Survival Time (RMST, IPW-weighted) ---")
     try:
-        rmst = sa.rmst(df, time_col, outcome_col, treatment_col)
+        rmst = sa.rmst(df, time_col, outcome_col, treatment_col, weights=weights)
         print(f"  RMST (treated)   : {rmst.rmst_treatment:.2f} months")
         print(f"  RMST (control)   : {rmst.rmst_control:.2f} months")
         print(f"  RMST difference  : {rmst.rmst_difference:.2f} months")
@@ -247,10 +252,11 @@ def run_full_analysis(n: int = 3000, seed: int = 42) -> dict:
         print(f"  RMST failed: {e}")
         results["rmst_diff"] = None
 
-    # KM median survival
-    print("\n  --- Kaplan-Meier Median Survival ---")
+    # KM median survival (with IPW weights)
+    print("\n  --- Kaplan-Meier Median Survival (IPW-weighted) ---")
     try:
-        km = sa.kaplan_meier(df, time_col, outcome_col, group_col=treatment_col)
+        km = sa.kaplan_meier(df, time_col, outcome_col, group_col=treatment_col,
+                             weights=weights)
         for grp, res in km.items():
             med = f"{res.median_survival:.2f}" if res.median_survival else "NR"
             print(f"  Group {grp}: median = {med} months")
@@ -289,13 +295,13 @@ def run_full_analysis(n: int = 3000, seed: int = 42) -> dict:
 
     senz = SensitivityAnalyzer()
 
-    # E-value for the HR
+    # E-value for the HR (using hazard_ratio estimate_type with conversion warning)
     print("\n  --- E-value (unmeasured confounding) ---")
     if results.get("cox_hr") is not None:
         hr = results["cox_hr"]
         # E-value is for risk ratios; convert HR if needed
         rr = hr if hr >= 1 else 1 / hr
-        ev = senz.e_value(rr)
+        ev = senz.e_value(rr, estimate_type="hazard_ratio")
         print(f"  {ev.interpretation}")
         results["e_value"] = ev.e_value_point
     else:

@@ -11,7 +11,12 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.app_name,
         version=settings.version,
-        description="Target Trial Emulation Framework for TCM using Real-World Evidence",
+        description=(
+            "Target Trial Emulation Framework for TCM using Real-World Evidence. "
+            "DISCLAIMER: This framework currently operates on synthetic and semi-realistic "
+            "data for method validation only. All results are for benchmarking causal inference "
+            "pipelines and do not represent real clinical findings."
+        ),
     )
     app.add_middleware(
         CORSMiddleware,

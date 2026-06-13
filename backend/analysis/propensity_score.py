@@ -1,4 +1,8 @@
-"""Propensity score estimation, IPTW, matching, and stratification."""
+"""Propensity score estimation, IPTW, matching, and stratification.
+
+DISCLAIMER: All results in this module are computed on synthetic or semi-realistic
+data for method validation only. They do not represent real clinical findings.
+"""
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional

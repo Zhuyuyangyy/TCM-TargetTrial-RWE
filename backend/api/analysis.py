@@ -42,6 +42,7 @@ class SensitivityRequest(BaseModel):
     ci_lower: Optional[float] = None
     ci_upper: Optional[float] = None
     analysis_type: str = "both"
+    estimate_type: str = "risk_ratio"  # 'risk_ratio', 'odds_ratio', 'hazard_ratio'
 
 
 class CERequest(BaseModel):
@@ -108,17 +109,27 @@ async def run_survival(req: SurvivalRequest, data_key: str = "data"):
 
 @router.post("/sensitivity")
 async def run_sensitivity(req: SensitivityRequest):
+    """Sensitivity analysis for unmeasured confounding.
+
+    NOTE: All results are computed on synthetic/semi-realistic data for
+    method validation only and do not represent real clinical findings.
+    """
     sa = SensitivityAnalyzer()
     results = {}
     if req.analysis_type in ("evalue", "both"):
-        ev = sa.e_value(req.estimate, req.ci_lower, req.ci_upper)
-        results["e_value"] = {"point_estimate": round(ev.e_value_point, 4),
-                              "ci_bound": round(ev.e_value_ci, 4) if ev.e_value_ci else None,
-                              "interpretation": ev.interpretation}
+        try:
+            ev = sa.e_value(req.estimate, req.ci_lower, req.ci_upper,
+                            estimate_type=req.estimate_type)
+            results["e_value"] = {"point_estimate": round(ev.e_value_point, 4),
+                                  "ci_bound": round(ev.e_value_ci, 4) if ev.e_value_ci else None,
+                                  "interpretation": ev.interpretation}
+        except (ValueError, TypeError) as e:
+            results["e_value"] = {"error": str(e)}
     if req.analysis_type in ("tipping", "both"):
         tp = sa.tipping_point(req.estimate, req.se)
         results["tipping_point"] = {"tipping_gamma": round(tp.tipping_gamma, 4),
                                     "interpretation": tp.interpretation}
+    results["_disclaimer"] = "Results computed on synthetic data for method validation only."
     return results
 
 

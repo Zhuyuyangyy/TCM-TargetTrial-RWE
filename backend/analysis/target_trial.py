@@ -1,4 +1,12 @@
-"""Target Trial Emulator -- orchestrates the full target trial emulation pipeline."""
+"""Target Trial Emulator -- orchestrates the full target trial emulation pipeline.
+
+DISCLAIMER: All results produced by this emulator are computed on synthetic or
+semi-realistic data for method validation purposes only. They do not represent
+real clinical findings and should not be used for clinical decision-making.
+
+PLANNED: Cloning + censoring for immortal time bias correction.
+See backend/analysis/survival.py for details.
+"""
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
@@ -48,30 +56,38 @@ class TargetTrialEmulator:
 
     def emulate(self, df, treatment_col, outcome_col, covariate_cols,
                 time_col=None, causal_method="aipw"):
-        warnings = []
+        warns = []
         eligible = self.apply_eligibility(df)
         if len(eligible) < 50:
-            warnings.append(f"Small sample after eligibility: n={len(eligible)}")
+            warns.append(f"Small sample after eligibility: n={len(eligible)}")
         n_treated = int(eligible[treatment_col].sum())
         n_control = len(eligible) - n_treated
         ps_result = self.ps_analyzer.full_analysis(eligible, treatment_col, covariate_cols, method="iptw")
         engine = AIPW() if causal_method == "aipw" else IPW()
         causal_est = engine.estimate(eligible, treatment_col, outcome_col, covariate_cols)
         cox_result = rmst_result = None
+        # Pass IPW weights to survival models for confounding adjustment
+        ipw_weights = ps_result.weights
         if time_col and time_col in eligible.columns:
             try:
-                cox_result = self.survival_analyzer.cox_ph(eligible, time_col, outcome_col, treatment_col, covariate_cols)
+                cox_result = self.survival_analyzer.cox_ph(
+                    eligible, time_col, outcome_col, treatment_col, covariate_cols,
+                    weights=ipw_weights,
+                )
             except Exception as e:
-                warnings.append(f"Cox PH failed: {e}")
+                warns.append(f"Cox PH failed: {e}")
             try:
-                rmst_result = self.survival_analyzer.rmst(eligible, time_col, outcome_col, treatment_col)
+                rmst_result = self.survival_analyzer.rmst(
+                    eligible, time_col, outcome_col, treatment_col,
+                    weights=ipw_weights,
+                )
             except Exception as e:
-                warnings.append(f"RMST failed: {e}")
+                warns.append(f"RMST failed: {e}")
         balance = self.ps_analyzer.assess_balance(eligible, treatment_col, covariate_cols, ps_result.weights)
         return TrialEmulationResult(
             protocol_id=self.protocol.trial_id, n_eligible=len(eligible),
             n_treated=n_treated, n_control=n_control,
             causal_estimate=causal_est, ps_result=ps_result,
             cox_result=cox_result, rmst_result=rmst_result,
-            covariate_balance=balance.standardized_mean_differences, warnings=warnings,
+            covariate_balance=balance.standardized_mean_differences, warnings=warns,
         )

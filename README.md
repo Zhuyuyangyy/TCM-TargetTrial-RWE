@@ -21,9 +21,11 @@ The system provides a complete causal inference pipeline: protocol specification
 ### Key Research Contributions
 
 - **Target trial emulation for TCM**: First framework to formalize TCM observational studies as emulated target trials following the Hernan & Robins paradigm
-- **Multi-method causal estimation**: IPW, AIPW (doubly robust), TMLE (targeted maximum likelihood), and Overlap Weighting with unified API
+- **Multi-method causal estimation**: IPW, AIPW (doubly robust with cross-fitting), TMLE (targeted maximum likelihood with cross-fitting), and Overlap Weighting with unified API
 - **TCM-aware protocol design**: Structured representation of TCM formulas, syndrome patterns, and treatment strategies alongside standard clinical variables
 - **Comprehensive sensitivity analysis**: E-value and tipping point methods for assessing robustness to unmeasured confounding
+
+> **IMPORTANT**: This framework currently uses synthetic and semi-realistic data for method validation only. All results are for benchmarking causal inference pipelines and do not represent real clinical findings. See the [Important Note](#important-note) section.
 
 ---
 
@@ -40,7 +42,7 @@ The system provides a complete causal inference pipeline: protocol specification
 | Method | Type | Key Property |
 |--------|------|-------------|
 | IPW | Inverse Probability Weighting | Stabilized weights, bootstrap SE |
-| AIPW | Augmented IPW | Doubly robust (consistent if either PS or outcome model correct) |
+| AIPW | Augmented IPW | Doubly robust, **cross-fitted** (5-fold), IF-based inference |
 | TMLE | Targeted MLE | Locally efficient, cross-fitted, EIC-based inference |
 | Overlap Weighting | Entropy/Overlap | Natural trimming of extreme PS, targets ATO |
 
@@ -197,7 +199,7 @@ pytest backend/tests/ -v
 |----------|-----|------|------|---------|
 | Doubly Robust | No | Yes | Yes | No |
 | Locally Efficient | No | No | Yes | No |
-| Cross-fitting | No | No | Yes (K-fold) | No |
+| Cross-fitting | No | Yes (K-fold) | Yes (K-fold) | No |
 | Inference Method | Bootstrap | IF-based | EIC-based | IF-based |
 | Extreme PS Handling | Trimming | Trimming | Trimming | Natural weighting |
 | Target Estimand | ATE | ATE | ATE | ATO |
@@ -256,8 +258,10 @@ If you use this framework in your research, please cite:
 
 ## Roadmap
 
-- [ ] Integration with real TCM hospital HIS/EHR systems
-- [ ] Doubly robust TMLE with Super Learner ensemble
+- [ ] Integration with real TCM hospital HIS/EHR systems (currently synthetic data only)
+- [ ] **SuperLearner ensemble** for PS and outcome models (currently single learners: GBM, LR, RF)
+- [ ] **Clone-censor-weight (CCW)** for immortal time bias correction
+- [ ] Landmark analysis for complementary sensitivity to immortal time bias
 - [ ] Instrumental variable estimation (2SLS, LATE)
 - [ ] Marginal structural models (MSM) for time-varying treatments
 - [ ] Bayesian causal inference with informative priors
@@ -298,7 +302,14 @@ TCM-TargetTrial-RWE/
 
 ## Important Note
 
-This framework currently uses synthetic and semi-realistic data for method validation and benchmarking. For publication-grade research, integration with real TCM hospital HIS/EHR systems is required. The causal estimation methods are fully implemented and validated against known analytical properties.
+> **This framework currently uses synthetic and semi-realistic data for method validation and benchmarking only.** All results, including causal estimates, survival analyses, and sensitivity analyses, are computed on simulated data and do not represent real clinical findings. They should not be used for clinical decision-making or cited as evidence of treatment effectiveness.
+>
+> For publication-grade research, integration with real TCM hospital HIS/EHR systems is required. The causal estimation methods are fully implemented and validated against known analytical properties using synthetic data with known data-generating processes.
+>
+> **Known limitations of the current release:**
+> - Individual learners (GBM, LR, RF) are used for PS and outcome models; **SuperLearner ensemble is planned but not yet implemented**
+> - **Immortal time bias** is not addressed; clone-censor-weight (CCW) and landmark methods are planned for a future release
+> - E-value computation assumes risk ratio inputs; odds ratios and hazard ratios are accepted with a conversion warning
 
 ---
 

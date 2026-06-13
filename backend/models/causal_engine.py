@@ -1,4 +1,15 @@
-"""Causal inference estimation engines: IPW, AIPW, and doubly-robust estimation."""
+"""Causal inference estimation engines: IPW, AIPW, and doubly-robust estimation.
+
+DISCLAIMER: All causal estimates produced by this module are computed on synthetic
+or semi-realistic data for method validation only. They do not represent real
+clinical findings and should not be used for clinical decision-making.
+
+NOTE on SuperLearner: The current implementation uses individual learners
+(GradientBoosting, LogisticRegression) rather than a SuperLearner ensemble.
+SuperLearner (stacked generalization with cross-validation-based model
+selection) is planned for a future release. See: van der Laan MJ, Rose S.
+Targeted Learning. Springer, 2011.
+"""
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
@@ -107,34 +118,74 @@ class IPW:
 
 
 class AIPW:
-    """Augmented Inverse Probability Weighting (doubly robust) estimator."""
-    def __init__(self, ps_model=None, outcome_model=None, trim_percentile=99.0):
+    """Augmented Inverse Probability Weighting (doubly robust) estimator.
+
+    Uses K-fold cross-fitting to avoid overfitting bias in the nuisance model
+    estimates (propensity score and outcome models). Cross-fitting ensures that
+    each observation's AIPW contribution uses out-of-fold predictions, which is
+    required for the doubly-robust property and valid inference.
+
+    Reference: Chernozhukov V, et al. (2018). Double/debiased machine learning.
+    """
+    def __init__(self, ps_model=None, outcome_model=None, trim_percentile=99.0,
+                 n_splits=5, seed=42):
         self.ps_model = ps_model or LogisticRegression(max_iter=1000)
         self.outcome_model = outcome_model or GradientBoostingRegressor(
             n_estimators=100, max_depth=3, random_state=42)
         self.trim_percentile = trim_percentile
+        self.n_splits = n_splits
+        self.seed = seed
 
     def estimate(self, df, treatment_col, outcome_col, covariate_cols) -> CausalEstimate:
+        from sklearn.model_selection import KFold
+        from sklearn.base import clone
+
         X = df[covariate_cols].values
         t = df[treatment_col].values.astype(float)
         y = df[outcome_col].values
-        self.ps_model.fit(X, t)
-        ps = np.clip(self.ps_model.predict_proba(X)[:, 1], 0.01, 0.99)
-        from sklearn.base import clone
-        m1, m0 = clone(self.outcome_model), clone(self.outcome_model)
-        mask1, mask0 = t == 1, t == 0
-        m1.fit(X[mask1], y[mask1])
-        m0.fit(X[mask0], y[mask0])
-        mu1 = m1.predict(X)
-        mu0 = m0.predict(X)
-        aipw_t = t * (y - mu1) / ps + mu1
-        aipw_c = (1-t) * (y - mu0) / (1-ps) + mu0
+        n = len(y)
+
+        # Cross-fitting: split data into K folds, fit nuisance models on K-1
+        # folds and predict on the held-out fold
+        kf = KFold(n_splits=self.n_splits, shuffle=True, random_state=self.seed)
+        ps_full = np.zeros(n)
+        mu1_full = np.zeros(n)
+        mu0_full = np.zeros(n)
+
+        for train_idx, val_idx in kf.split(X):
+            X_tr, X_val = X[train_idx], X[val_idx]
+            t_tr, y_tr = t[train_idx], y[train_idx]
+
+            # Propensity model on training fold
+            ps_model = clone(self.ps_model)
+            ps_model.fit(X_tr, t_tr)
+            ps_full[val_idx] = np.clip(
+                ps_model.predict_proba(X_val)[:, 1], 0.01, 0.99)
+
+            # Outcome models on treated/control subsets of training fold
+            mask1 = t_tr == 1
+            mask0 = t_tr == 0
+            m1 = clone(self.outcome_model)
+            m0 = clone(self.outcome_model)
+            if mask1.sum() > 5:
+                m1.fit(X_tr[mask1], y_tr[mask1])
+                mu1_full[val_idx] = m1.predict(X_val)
+            if mask0.sum() > 5:
+                m0.fit(X_tr[mask0], y_tr[mask0])
+                mu0_full[val_idx] = m0.predict(X_val)
+
+        # AIPW estimator with cross-fitted nuisance parameters
+        aipw_t = t * (y - mu1_full) / ps_full + mu1_full
+        aipw_c = (1 - t) * (y - mu0_full) / (1 - ps_full) + mu0_full
         ate = np.mean(aipw_t - aipw_c)
+
+        # Influence-function-based SE (valid under cross-fitting)
         if_scores = aipw_t - aipw_c - ate
-        se = np.std(if_scores) / np.sqrt(len(df))
+        se = np.std(if_scores) / np.sqrt(n)
+
         return CausalEstimate(
             estimate=ate, ci_lower=ate - 1.96*se, ci_upper=ate + 1.96*se,
-            se=se, method="AIPW", n_obs=len(df), n_effective=float(len(df)),
+            se=se, method="AIPW_crossfit", n_obs=n, n_effective=float(n),
         )
 
 
